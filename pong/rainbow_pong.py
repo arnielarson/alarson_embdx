@@ -3,8 +3,10 @@
   Rainbow Pong example game on Raspberry Pi using pygame, gpiozero
 
   Uses joystick to maneuver paddle
-  Joystick is connected to a Raspberry Pi via SPI to an ADC and to a GPIO as a button
-  Incorporates a simple state machine to handle game play 
+  Joystick is connected to a Raspberry Pi via SPI to an ADC and a GPIO as a button
+  Incorporates a simple hacky state machine to handle game play 
+
+  Goal, if there is one, is to hit as many balls as possible.. 
   
   arnie.larson@gmail.com
 
@@ -12,30 +14,37 @@
 
 import pygame
 import random
-import math
+import time
+from enum import Enum
 from gpiozero import Button, MCP3008
 pygame.init()
+pygame.mixer.init()
 
-WIDTH, HEIGHT = 700,500
+WIDTH, HEIGHT = 1400,800
 WIN = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Hello Pong")
+pygame.display.set_caption("Rainbow Pong")
 
 
-# throttle with FPS 
+# throttle the FPS 
 FPS = 60
 
 
 # Some colors 
-WHITE = (255,255,255)
-BLACK = (0,0,0)
-
+WHITE   = (255,255,255)
+BLACK   = (0,0,0)
+PURPLE  = (151,39,245)
+PINK    = (228,39,245)
+LIME    = (187,245,39)
+TANG    = (245,169,39)
+BLUE    = (108, 199, 245)
+ 
 # Other params
 PADDING = 5
-RADIUS = 10
+RADIUS = 15
 
 
 class Joystick:
-  MAX_DV = 7  ## corresponds to 7 pixels per frame, ~ 400 pixels per second 
+  MAX_DV = 6  ## corresponds to 6 pixels per frame, ~ 350 pixels per second 
  
   ## Just needs to read the adc and convert to screen coordinates
   def __init__(self, button_gpio=22, chanvx=0, chanvy=1):
@@ -137,13 +146,15 @@ class Paddle:
 
 # Collisions - if ball is moving right and hits left side of paddle
 def check_collision(ball, paddle):
-  
+  score = 0
+
   # check left side
   if ( ball.x <= paddle.x ) and (ball.x + ball.radius >= paddle.x ):
     if (ball.y > paddle.y) and (ball.y < paddle.y + paddle.height):
       # Left side collision
       if ball.vx > 0:
         ball.vx= -ball.vx      
+        score+=1
   
   # need right side now
   if ( ball.x >= paddle.x + paddle.width ) and (ball.x - ball.radius <= paddle.x + paddle.width):
@@ -151,6 +162,7 @@ def check_collision(ball, paddle):
       # Right side collision
       if ball.vx < 0:
         ball.vx= -ball.vx 
+        score+=1
 
   # check top and bottom
   if (ball.x >= paddle.x) and (ball.x <= paddle.x+paddle.width):
@@ -160,44 +172,235 @@ def check_collision(ball, paddle):
         ball.vy = -2
       elif ball.vy > 0:
         ball.vy = -ball.vy
+      score+=1
+
     # bottom side
     if (ball.y >= paddle.y + paddle.height) and (ball.y <= paddle.y + paddle.height + ball.radius):
       if ball.vy == 0:
         ball.vy = 2
       elif ball.vy < 0:
         ball.vy = -ball.vy
+      score+=1
+    
+  return score
 
 
 
-# Here update the canvas
-def draw(win, objs):
+
+"""
+  State Manager Class
+
+  Manages state transitions, background animations, object transitions, and rendering
+
+  Adding any more *stuff* to the game would want to make states their own classes
+"""
+class State:
+  # Spawn new balls
+  MAX_BALLS = 5
+  # background render color
+  bg = BLACK
+  # counters used for state transitions, animations, IO
+  button_ctx = time_ctx = 0
+  # sounds
+  s1 = pygame.mixer.Sound("wav/chipmunk.wav")
+  s2 = pygame.mixer.Sound("wav/chipmunkend.wav")
+  # state parameter
+  animate = True
+
+  FPS_FONT = pygame.font.SysFont("DejaVuSansMono",35)
+  GAME_OVER_FONT = pygame.font.SysFont("FreeMono",120)
+  SCORE_FONT = pygame.font.SysFont("NotoSansMono-Bold",35)
+  fps_text = None
+  score = 0
+
+  # Primary state
+  class STATE(Enum):
+    BEGIN = 1
+    HYPE = 2
+    MIDDLE = 3
+    HYPE2 = 4
+    END = 5
+  # Secondary "hyper" state
+  class HYPE(Enum):
+    FIRST = 1
+    SECOND = 2
+    THIRD = 3
+    FOURTH = 4
+  # Secondary end state
+  class END(Enum):
+    FIRST = 1
+    SECOND = 2
+
+  def __init__(self, paddle, ball):
+    self.paddle = paddle
+    self.balls = []
+    self.balls.append(ball)
+    self.state = self.STATE.BEGIN
+    self.seconds = time.time()
+
+  # Spawn up to MAX_BALLS 
+  def add_ball(self):
+    if self.button_ctx > 20:
+      self.button_ctx = 0
+      x = WIDTH//2 + random.randint(-WIDTH//4, WIDTH//4)
+      y = HEIGHT//2 + random.randint(-HEIGHT//4, HEIGHT//4)
+      r = RADIUS + random.randint(0, RADIUS)  
+      ball = Ball(x, y, r )
+      if len(self.balls) >= self.MAX_BALLS:
+        self.balls[random.randint(0,self.MAX_BALLS-1)]=ball
+      else:
+        self.balls.append(ball)  
+
+  """
+    Setting states deterministically, just playing around with animating the game play
+    States:
+      BEGIN     Black and White Pong like
+      HYPE      Music, update color schemes
+      MIDDLE    Calm
+      FINISH    Music, more extreme color scheme updates
+      END       Game play off (show or offer play again option to transition to BEGIN?)
+  """
+  def update_state(self, keys):
+    self.button_ctx += 1
+    self.time_ctx += 1
+    
+
+
+    for b in self.balls:
+      b.update()
+    for b in self.balls:
+      self.score += check_collision(b, self.paddle)
+
+
+    # Calculate FPS
+    if self.time_ctx % 60 == 0:
+      t2 = time.time()
+      dt = t2 - self.seconds
+      self.seconds = t2
+      fps = int(60/dt)
+      self.fps_text = self.FPS_FONT.render(f"FPS: {fps}", 1, WHITE)
+
+    self.score_text = self.SCORE_FONT.render(f"Score: {self.score}", 1, WHITE)  
+
+    # State transition to HYPE state
+    if self.time_ctx == FPS*8:  ## after 8 seconds
+      #self.s1.play(fade_ms=100)
+      self.state = self.STATE.HYPE
+      self.hype = self.HYPE.FIRST
+      self.bg = PURPLE
+
+    # State transition to MIDDLE state
+    if self.time_ctx == FPS*34:
+      self.state = self.STATE.MIDDLE
+      self.bg = BLUE
+    
+    # State transition to HYPE2 state
+    if self.time_ctx == FPS*42:
+      #self.s2.play(fade_ms=100)
+      self.state = self.STATE.HYPE2
+      self.hype = self.HYPE.FIRST
+      self.bg = PURPLE
+
+    # Transition to END state
+    if self.time_ctx == FPS*74:
+      self.state = self.STATE.END
+      self.end_state = self.END.FIRST
+      self.animate = False
+    
+    # Toggle HYPE state
+    if (self.state == self.STATE.HYPE) and (self.time_ctx % 14 == 0):    
+      if self.hype == self.HYPE.FIRST:
+        self.hype = self.HYPE.SECOND
+        self.bg = PINK
+      else:
+        self.hype = self.HYPE.FIRST
+        self.bg = PURPLE
+
+    # Toggle HYPE2 state, (changes background colors)
+    if (self.state == self.STATE.HYPE2) and (self.time_ctx % 8 == 0):    
+      if self.hype == self.HYPE.FIRST:
+        self.hype = self.HYPE.SECOND
+        self.bg = PINK
+      elif self.hype == self.HYPE.SECOND:
+        self.hype = self.HYPE.THIRD
+        self.bg = LIME
+      elif self.hype == self.HYPE.THIRD:
+        self.hype = self.HYPE.FOURTH
+        self.bg = TANG
+      else:
+        self.hype = self.HYPE.FIRST
+        self.bg = PURPLE
+
+    # Toggle END state
+    if (self.state == self.STATE.END) and (self.time_ctx % 30 == 0):    
+      if self.end_state == self.END.FIRST:
+        self.end_state = self.END.SECOND
+      else:
+        self.end_state = self.END.FIRST
+
+    # Animate BG in middle
+    if (self.state == self.STATE.MIDDLE) and (self.time_ctx % 3 == 0):
+      # rotate through colors
+      r = (self.bg[0]+1)%255
+      g = (self.bg[1]+1)%255
+      b = (self.bg[2]+1)%255
+      self.bg = (r,g,b)
   
-  # Draw any canvas details
-  win.fill(BLACK)
-  # draw a mid line
-  start_y, len_y = 20, 20
-  while(start_y < HEIGHT):
-    pygame.draw.line(win, WHITE, (WIDTH//2-5, start_y), (WIDTH//2-5, start_y + len_y), 10)
-    start_y += 2*len_y
+    # Animage BG in END
+    if (self.state == self.STATE.END) and (self.time_ctx % 3 == 0):
+      # rotate through colors
+      r = (self.bg[0]+1)%255
+      g = (self.bg[1]+2)%255
+      b = (self.bg[2]+3)%255
+      self.bg = (r,g,b)
+
+    # Add a reset function on spacebar key
+    # pygame.K_SPACE
+
+    
+    
+
+  def draw(self, win):
+    # Draw any canvas details
+    win.fill(self.bg)
+    
+    # draw the fps
+    if self.fps_text:
+      win.blit(self.fps_text, (10, 10))
+
+    win.blit(self.score_text, (WIDTH - 200, 10))
+    # animate blinking blit for end game
+    if (self.state == self.STATE.END) and (self.end_state == self.END.FIRST):
+      win.blit(self.GAME_OVER_FONT.render("GAME OVER", 1, WHITE), (WIDTH//3,HEIGHT//3))
+      
+      
+    
   
-  # Draw game objects
-  for obj in objs:
-    obj.draw(win)
+    # Draw game objects
+    if self.animate:
+      start_y, len_y = 20, 20
+      while(start_y < HEIGHT):
+        pygame.draw.line(win, WHITE, (WIDTH//2-5, start_y), (WIDTH//2-5, start_y + len_y), 10)
+        start_y += 2*len_y
+      
+      for ball in self.balls:
+        ball.draw(win)
+      self.paddle.draw(win)
 
-  pygame.display.update()
+    pygame.display.update()
 
-
-  # main program control loop
+# main program control loop
 def main():
   run = True
   clock = pygame.time.Clock()
 
-  paddle = Paddle(WIDTH - 20, HEIGHT - 200, 15, 150)
+  paddle = Paddle(WIDTH - 20, HEIGHT - 200, 30, 200)
   ball = Ball(WIDTH//2, HEIGHT//2, RADIUS)
   joystick = Joystick()
-
-  balls = [ball]
-  objs = [paddle,ball]
+  state = State(paddle, ball)
+  #balls = [ball]
+  #objs = [paddle,ball]
+  
   while run:
     clock.tick(FPS)
 
@@ -212,18 +415,16 @@ def main():
       run = False
       break                   
 
+    # Check user inputs
     (dx, dy) = joystick.get_dv()
     paddle.update(dx,dy)
-    for b in balls:
-      b.update()
-    for b in balls:
-      check_collision(b, paddle)
 
-    # check collisions
-    # ball.left_col(paddle.x, paddle.y, paddle.height)
+    if joystick.get_pressed():
+      state.add_ball()
 
-    ## Update canvas
-    draw(WIN, objs)
+    # Update game states and redraw
+    state.update_state(keys)
+    state.draw(WIN)
 
 
 

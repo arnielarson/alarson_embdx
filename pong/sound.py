@@ -2,7 +2,7 @@
 """
   Looking into using pygame to play sounds
 
-  arnie.larson@gmail.com+ ball.radius 
+  arnie.larson@gmail.com
 
 """
 
