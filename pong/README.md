@@ -19,6 +19,7 @@ button connected to a GPIO.
 
 - Game played well on a RPi 400 with Debian Bullseye
 - Pong - 2 player game with one joystick is a facsimile of the arcade classic
-- Basic Pong a POC looking into pygame
-- Rainbow Pong added colors to the beat of the music from "Chipmunk at the Gaspump" by Laurie Berkner,
-    this was fun but was a little jarring and harsh
+- Pong plays SmartGuy from MeanMachineDean [m key toggles music on/off]
+- Basic Pong a POC looking into pygam
+- Rainbow Pong added colors to the beat of the music from "Chipmunk at the Gaspump" by Laurie Berkner, this was fun but was a little jarring and harsh
+- Sounds from wav files are not checked in, would need to be commented out to actually run
