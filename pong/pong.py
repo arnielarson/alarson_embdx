@@ -249,13 +249,13 @@ class State:
   # global counter
   time_ctx = 0
   ball_ctx = 0
-  
+  btn_ctx = 0
+
   # Paddle max DX
   MAX_DV = 6  ## corresponds to 6 pixels per frame, ~ 350 pixels per second 
 
   # music / sound
   music = True
-  music_btn_ctx = 0
   sound = pygame.mixer.Sound("wav/smartguy.wav")
   
   # Fonts used for text displays
@@ -286,6 +286,7 @@ class State:
     self.score1 = 0
     self.score2 = 0
     self.animate = True
+    self.practice = False
     self.seconds = time.time()
     
 
@@ -298,7 +299,7 @@ class State:
   def update_state(self, keys):
     
     # Always do
-    self.music_btn_ctx +=1
+    self.btn_ctx +=1
     self.time_ctx +=1
 
     # Update/calculate FPS every 60 frames
@@ -312,15 +313,20 @@ class State:
 
     # BEGIN State:
     if self.state == self.STATE.BEGIN:
+      if (keys[pygame.K_p]):
+        self.practice = True
+      if self.practice:
+        self.update_paddles(keys)
       if (keys[pygame.K_SPACE]):
         self.state = self.STATE.PLAY
         if self.music: 
           self.sound.play(loops=10)
         
+        
     # toggle music
-    if (keys[pygame.K_m] and self.music_btn_ctx>12):
+    if (keys[pygame.K_m] and self.btn_ctx>12):
       self.music = not self.music
-      self.music_btn_ctx = 0
+      self.btn_ctx = 0
       if not self.music and (self.STATE.PLAY or self.STATE.WAIT):
         self.sound.stop()
       if self.music and (self.STATE.PLAY or self.STATE.WAIT):
@@ -341,7 +347,7 @@ class State:
           self.score2 += score[1]
           self.launch_right=False
         
-        if max(self.score1, self.score2) >= 3:
+        if max(self.score1, self.score2) >= 10:
           self.state = self.STATE.END
           
         else: 
